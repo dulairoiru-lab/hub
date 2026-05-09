@@ -1,0 +1,185 @@
+local OrionLib = loadstring(game:HttpGet("https://raw.githubusercontent.com/shlexware/Orion/main/source"))()
+local Window = OrionLib:MakeWindow({Name = "Smilehub - Blobman Specialist", HidePremium = true, SaveConfig = false, IntroEnabled = false})
+
+local Players = game:GetService("Players")
+local LP = Players.LocalPlayer
+local RS = game:GetService("ReplicatedStorage")
+
+-- ターゲット管理用
+local selectedPlayer = nil
+local isActive = false
+
+-- ============================================
+-- 共通・補助関数
+-- ============================================
+
+-[span_0](start_span)[span_1](start_span)[span_2](start_span)- 自分のブロブマンを探す[span_0](end_span)[span_1](end_span)[span_2](end_span)
+local function findMyBlobman()
+    local folder = workspace:FindFirstChild(LP.Name .. "SpawnedInToys")
+    if folder then
+        local b = folder:FindFirstChild("CreatureBlobman")
+        if b and b:FindFirstChild("VehicleSeat") then return b end
+    end
+    return nil
+end
+
+-[span_3](start_span)[span_4](start_span)[span_5](start_span)[span_6](start_span)- ブロブマンの準備（スポーン & 搭乗）[span_3](end_span)[span_4](end_span)[span_5](end_span)[span_6](end_span)
+local function EnsureBlobman()
+    local blob = findMyBlobman()
+    if not blob then
+        RS.MenuToys.SpawnToyRemoteFunction:InvokeServer("CreatureBlobman", LP.Character.HumanoidRootPart.CFrame, Vector3.new(0, 127, 0))
+        task.wait(0.8)
+        blob = findMyBlobman()
+    end
+    
+    if blob then
+        local seat = blob.VehicleSeat
+        local hum = LP.Character:FindFirstChildOfClass("Humanoid")
+        if hum and not hum.Sit then
+            seat:Sit(hum)
+            task.wait(0.3)
+        end
+    end
+    return blob
+end
+
+-[span_7](start_span)[span_8](start_span)[span_9](start_span)[span_10](start_span)- 6秒キック / 掴み・離しロジック[span_7](end_span)[span_8](end_span)[span_9](end_span)[span_10](end_span)
+local function ExecuteGrabProcess(blob, targetRoot, mode)
+    local script = blob:FindFirstChild("BlobmanSeatAndOwnerScript", true)
+    local remoteGrab = script:FindFirstChild("CreatureGrab")
+    local remoteDrop = script:FindFirstChild("CreatureDrop") or script:FindFirstChild("CreatureRelease")
+    local det = blob:FindFirstChild("LeftDetector")
+    local weld = det and (det:FindFirstChild("LeftWeld") or det:FindFirstChildWhichIsA("Weld"))
+
+    pcall(function()
+        -[span_11](start_span)[span_12](start_span)[span_13](start_span)- ネットワークオーナー取得[span_11](end_span)[span_12](end_span)[span_13](end_span)
+        RS.GrabEvents.SetNetworkOwner:FireServer(targetRoot, LP.Character.HumanoidRootPart.CFrame)
+        task.wait(0.08)
+        
+        if mode == "Kick" then
+            [span_14](start_span)targetRoot.CFrame = targetRoot.CFrame + Vector3.new(0, 16, 0) -- 浮かせる[span_14](end_span)
+            task.wait(0.08)
+            remoteGrab:FireServer(det, targetRoot, weld)
+            task.wait(0.08)
+            [span_15](start_span)remoteDrop:FireServer(det, targetRoot) -- 排除[span_15](end_span)
+            RS.GrabEvents.DestroyGrabLine:FireServer(targetRoot)
+        elseif mode == "Grab" then
+            remoteGrab:FireServer(det, targetRoot, weld)
+        elseif mode == "Release" then
+            remoteDrop:FireServer(det, targetRoot)
+        end
+    end)
+end
+
+-- ============================================
+-- UI構成
+-- ============================================
+local Tab = Window:MakeTab({Name = "Blobman Beta", Icon = "rbxassetid://4483362458", PremiumOnly = false})
+
+Tab:AddDropdown({
+    Name = "ターゲット選択",
+    Default = "",
+    Options = (function()
+        local list = {}
+        for _, p in ipairs(Players:GetPlayers()) do
+            if p ~= LP then table.insert(list, p.Name) end
+        end
+        return list
+    end)(),
+    Callback = function(Value)
+        selectedPlayer = Players:FindFirstChild(Value)
+    end
+})
+
+Tab:AddSection({Name = "キック & 連れ去り"})
+
+-[span_16](start_span)- 6秒キック (提供されたtxtのロジック)[span_16](end_span)
+Tab:AddButton({
+    Name = "🚀 6秒キック (テレポート付)",
+    Callback = function()
+        if not selectedPlayer or isActive then return end
+        isActive = true
+        local blob = EnsureBlobman()
+        local targetRoot = selectedPlayer.Character and selectedPlayer.Character:FindFirstChild("HumanoidRootPart")
+        
+        if blob and targetRoot then
+            local myRoot = LP.Character.HumanoidRootPart
+            local oldPos = myRoot.CFrame
+            [span_17](start_span)[span_18](start_span)myRoot.CFrame = targetRoot.CFrame -- 家貫通テレポート[span_17](end_span)[span_18](end_span)
+            task.wait(0.1)
+            ExecuteGrabProcess(blob, targetRoot, "Kick")
+            task.wait(0.2)
+            [span_19](start_span)[span_20](start_span)myRoot.CFrame = oldPos -- 帰還[span_19](end_span)[span_20](end_span)
+        end
+        isActive = false
+    end
+})
+
+-[span_21](start_span)- 連れ去り (自分のところにテレポート.txt)[span_21](end_span)
+Tab:AddButton({
+    Name = "🎯 ターゲットを自分の位置へ連れ去る",
+    Callback = function()
+        if not selectedPlayer or isActive then return end
+        isActive = true
+        local myRoot = LP.Character.HumanoidRootPart
+        local oldPos = myRoot.CFrame
+        local blob = EnsureBlobman()
+        local targetRoot = selectedPlayer.Character and selectedPlayer.Character:FindFirstChild("HumanoidRootPart")
+
+        if blob and targetRoot then
+            myRoot.CFrame = targetRoot.CFrame
+            task.wait(0.1)
+            ExecuteGrabProcess(blob, targetRoot, "Grab")
+            task.wait(0.1)
+            [span_22](start_span)myRoot.CFrame = oldPos -- 自分だけ戻る[span_22](end_span)
+            task.wait(0.2)
+            [span_23](start_span)targetRoot.CFrame = oldPos * CFrame.new(0, 20, 0) -- ターゲットを召喚[span_23](end_span)
+            ExecuteGrabProcess(blob, targetRoot, "Release")
+        end
+        isActive = false
+    end
+})
+
+Tab:AddSection({Name = "一括排除"})
+
+-[span_24](start_span)[span_25](start_span)- 家貫通Kick All[span_24](end_span)[span_25](end_span)
+Tab:AddButton({
+    Name = "🌪️ 家貫通Kick All (空中円形配置)",
+    Callback = function()
+        if isActive then return end
+        isActive = true
+        local blob = EnsureBlobman()
+        local myRoot = LP.Character.HumanoidRootPart
+        local originalPos = myRoot.CFrame
+        
+        local targets = {}
+        for _, p in ipairs(Players:GetPlayers()) do
+            if p ~= LP and p.Character then table.insert(targets, p) end
+        end
+
+        for _, p in ipairs(targets) do
+            local tRoot = p.Character:FindFirstChild("HumanoidRootPart")
+            if tRoot then
+                myRoot.CFrame = tRoot.CFrame
+                task.wait(0.05)
+                ExecuteGrabProcess(blob, tRoot, "Kick")
+            end
+        end
+
+        -[span_26](start_span)- 仕上げの円形配置[span_26](end_span)
+        local centerPos = CFrame.new(0, 100, 0)
+        myRoot.CFrame = centerPos
+        task.wait(0.1)
+        for i, p in ipairs(targets) do
+            local tRoot = p.Character and p.Character:FindFirstChild("HumanoidRootPart")
+            if tRoot then
+                local angle = math.rad((i - 1) * (360 / #targets))
+                tRoot.CFrame = centerPos * CFrame.new(math.cos(angle) * 15, 0, math.sin(angle) * 15)
+            end
+        end
+        
+        isActive = false
+    end
+})
+
+OrionLib:Init()
